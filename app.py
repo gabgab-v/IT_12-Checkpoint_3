@@ -1139,118 +1139,48 @@ def checkout():
 def unified_checkout():
     try:
         total_price = 0
-        all_checks_pass = True  # Flag to ensure all checks pass before making any changes
+        transaction_success = True  # To track if any part of the transaction fails
 
-        # Step 1: Pre-checks for Product Checkout
+        # Step 1: Process Product Transactions
         product_ids = request.form.getlist('product_ids[]')
         quantities = request.form.getlist('quantities[]')
-        if product_ids and quantities:
-            for product_id, quantity in zip(product_ids, quantities):
-                product = Product.query.get(product_id)
-                quantity = int(quantity)
-                if product.stock < quantity:
-                    flash(f'Not enough stock for {product.name}', 'danger')
-                    all_checks_pass = False
 
-        # Step 2: Pre-checks for Print Service Checkout
+        if product_ids and quantities:
+            try:
+                for product_id, quantity in zip(product_ids, quantities):
+                    product = Product.query.get(product_id)
+                    quantity = int(quantity)
+                    
+                    if product.stock < quantity:
+                        flash(f'Not enough stock for {product.name}', 'danger')
+                        transaction_success = False
+                    else:
+                        # Deduct stock and create product transaction
+                        product.stock -= quantity
+                        total_price_for_product = product.price * quantity
+                        total_price += total_price_for_product
+
+                        new_product_transaction = Transaction(
+                            user_id=current_user.id,
+                            product_id=product.id,
+                            quantity=quantity,
+                            total_price=total_price_for_product
+                        )
+                        db.session.add(new_product_transaction)
+                db.session.commit()
+            except Exception as e:
+                db.session.rollback()
+                flash(f"Product transaction failed: {str(e)}", 'danger')
+                transaction_success = False
+
+        # Step 2: Process Print Service Transactions
         service_ids = request.form.getlist('service_ids[]')
         pages = request.form.getlist('pages[]')
         paper_type_ids = request.form.getlist('paper_type_ids[]')
         back_to_back_list = request.form.getlist('back_to_back[]')
 
         if service_ids and pages:
-            for service_id, page_count, paper_type_id, back_to_back in zip(service_ids, pages, paper_type_ids, back_to_back_list):
-                page_count = int(page_count)
-                back_to_back = back_to_back == 'Yes'
-                if back_to_back:
-                    page_count = max(1, page_count // 2)
-
-                paper_inventory = PaperInventory.query.filter_by(id=paper_type_id).first()
-                if paper_inventory.individual_paper_count < page_count:
-                    flash('Not enough paper in stock!', 'danger')
-                    all_checks_pass = False
-
-        # Step 3: Pre-checks for Load Transaction
-        load_amounts = request.form.getlist('load_amounts[]')
-        service_providers = request.form.getlist('service_providers[]')
-        transaction_type_ids = request.form.getlist('transaction_type_ids[]')
-        load_balance = LoadBalance.query.first()
-
-        if load_balance is None:
-            load_balance = LoadBalance(normal_load=0.0, gcash_balance=0.0)
-            db.session.add(load_balance)
-            db.session.commit()
-
-        if load_amounts and service_providers:
-            for amount_loaded_str, provider in zip(load_amounts, service_providers):
-                try:
-                    amount_loaded = float(amount_loaded_str)
-                    if amount_loaded <= 0:
-                        raise ValueError("Amount must be greater than zero.")
-                except ValueError:
-                    flash("Invalid amount entered for load service.", "danger")
-                    all_checks_pass = False
-                    continue  # Skip the rest of the loop for this entry
-
-                # Logic to handle balance deduction based on service provider
-                if provider == "GCash":
-                    balance = load_balance.gcash_balance
-                else:
-                    balance = load_balance.normal_load
-
-                # Check if balance is sufficient
-                if balance < amount_loaded:
-                    flash(f"Insufficient {provider} balance", "danger")
-                    all_checks_pass = False
-                    continue  # Skip this entry
-
-                # Determine total price based on the amount loaded
-                if amount_loaded >= 1000:
-                    total_price_for_load = amount_loaded + (amount_loaded * 0.02)  # 2% increase
-                else:
-                    total_price_for_load = amount_loaded + 5  # ₱5 fixed increase
-
-                # Deduct only the original loaded amount from the balance
-                if provider == "GCash":
-                    load_balance.gcash_balance -= amount_loaded
-                else:
-                    load_balance.normal_load -= amount_loaded
-
-                total_price += total_price_for_load
-
-                # Create and save the load transaction
-                new_load_transaction = Transaction(
-                    user_id=current_user.id,
-                    load_amount=amount_loaded,
-                    service_provider=provider,
-                    transaction_type_id=transaction_type_ids,
-                    total_price=total_price_for_load
-                )
-                db.session.add(new_load_transaction)
-
-        # Step 4: If all checks pass, proceed with the actual transaction
-        if all_checks_pass:
-            # Handle Product Checkout
-            if product_ids and quantities:
-                for product_id, quantity in zip(product_ids, quantities):
-                    product = Product.query.get(product_id)
-                    quantity = int(quantity)
-
-                    # Deduct stock and calculate total
-                    product.stock -= quantity
-                    total_price += product.price * quantity
-
-                    # Create product transaction
-                    new_product_transaction = Transaction(
-                        user_id=current_user.id,
-                        product_id=product.id,
-                        quantity=quantity,
-                        total_price=product.price * quantity
-                    )
-                    db.session.add(new_product_transaction)
-
-            # Handle Print Service Checkout
-            if service_ids and pages:
+            try:
                 for service_id, page_count, paper_type_id, back_to_back in zip(service_ids, pages, paper_type_ids, back_to_back_list):
                     service = PrintService.query.get(service_id)
                     page_count = int(page_count)
@@ -1259,65 +1189,174 @@ def unified_checkout():
                     if back_to_back:
                         page_count = max(1, page_count // 2)
 
-                    # Deduct paper stock and calculate cost
-                    paper_inventory = PaperInventory.query.filter_by(id=paper_type_id).first()
-                    paper_inventory.individual_paper_count -= page_count
-                    total_price += service.price_per_page * page_count * (0.9 if back_to_back else 1)
-
-                    # Create print transaction
-                    new_print_transaction = Transaction(
-                        user_id=current_user.id,
-                        print_service_id=service.id,
-                        pages=page_count,
-                        back_to_back=back_to_back,
-                        total_price=service.price_per_page * page_count
-                    )
-                    db.session.add(new_print_transaction)
-
-            # Handle Load Transaction
-            if load_amounts and service_providers:
-                for amount_loaded_str, provider, transaction_type_id in zip(load_amounts, service_providers, transaction_type_ids):
-                    amount_loaded = float(amount_loaded_str)
-
-                    # Deduct balance
-                    if provider == "GCash":
-                        load_balance.gcash_balance -= amount_loaded
+                    paper_inventory = PaperInventory.query.get(paper_type_id)
+                    if paper_inventory.individual_paper_count < page_count:
+                        flash(f"Not enough paper in stock for {service.name}", 'danger')
+                        transaction_success = False
                     else:
-                        load_balance.normal_load -= amount_loaded
+                        # Deduct paper and log the print service transaction
+                        paper_inventory.individual_paper_count -= page_count
+                        total_price_for_print = service.price_per_page * page_count
+                        total_price += total_price_for_print
 
-                    # Calculate additional fees
-                    if amount_loaded >= 1000:
-                        additional_fee = amount_loaded * 0.02  # 2% increase for amounts >= ₱1000
+                        new_print_transaction = Transaction(
+                            user_id=current_user.id,
+                            print_service_id=service.id,
+                            pages=page_count,
+                            back_to_back=back_to_back,
+                            total_price=total_price_for_print
+                        )
+                        db.session.add(new_print_transaction)
+                db.session.commit()
+            except Exception as e:
+                db.session.rollback()
+                flash(f"Print service transaction failed: {str(e)}", 'danger')
+                transaction_success = False
+
+        # Step 3: Process Load Transactions
+        load_amounts = request.form.getlist('load_amounts[]')
+        service_providers = request.form.getlist('service_providers[]')
+        transaction_type_ids = request.form.getlist('transaction_type_ids[]')
+        restock_ids = request.form.getlist('restock_ids[]')
+
+        load_balance = LoadBalance.query.first() or LoadBalance(normal_load=0.0, gcash_balance=0.0)
+        db.session.add(load_balance)
+        db.session.commit()
+
+        if load_amounts and service_providers:
+            try:
+                for amount_loaded_str, provider, transaction_type_id, restock_id in zip(load_amounts, service_providers, transaction_type_ids, restock_ids):
+                    try:
+                        amount_loaded = float(amount_loaded_str)
+                        if amount_loaded <= 0:
+                            raise ValueError("Amount must be greater than zero.")
+                    except ValueError:
+                        flash("Invalid amount entered for load service.", 'danger')
+                        transaction_success = False
+                        continue
+
+                    balance = load_balance.gcash_balance if provider == "GCash" else load_balance.normal_load
+
+                    if balance < amount_loaded:
+                        flash(f"Insufficient {provider} balance", 'danger')
+                        transaction_success = False
                     else:
-                        additional_fee = 5  # ₱5 fixed increase for amounts < ₱1000
+                        total_price_for_load = amount_loaded + (amount_loaded * 0.02 if amount_loaded >= 1000 else 5)
+                        total_price += total_price_for_load
 
-                    total_price_for_load = amount_loaded + additional_fee
-                    total_price += total_price_for_load
+                        if provider == "GCash":
+                            load_balance.gcash_balance -= amount_loaded
+                        else:
+                            load_balance.normal_load -= amount_loaded
 
-                    # Create load transaction
-                    new_load_transaction = Transaction(
-                        user_id=current_user.id,
-                        load_amount=amount_loaded,
-                        service_provider=provider,
-                        transaction_type_id=transaction_type_id,
-                        total_price=total_price_for_load
-                    )
-                    db.session.add(new_load_transaction)
+                        db.session.commit()
 
-            # Commit everything at once
-            db.session.commit()
+                        new_load_transaction = Transaction(
+                            user_id=current_user.id,
+                            load_amount=amount_loaded,
+                            service_provider=provider,
+                            transaction_type_id=transaction_type_id,
+                            total_price=total_price_for_load,
+                            restock_id=restock_id
+                        )
+                        db.session.add(new_load_transaction)
+
+                db.session.commit()
+            except Exception as e:
+                db.session.rollback()
+                flash(f"Load transaction failed: {str(e)}", 'danger')
+                transaction_success = False
+
+        # Final success message or failure notification
+        if transaction_success:
             flash(f'Checkout successful! Total price: P{total_price}', 'success')
-            return redirect(url_for('cashier'))
-
         else:
-            flash('One or more items could not be processed. Please check the stock or balances.', 'danger')
-            return redirect(url_for('cashier'))
+            flash('Some transactions failed, please review the errors above.', 'danger')
+
+        return redirect(url_for('cashier'))
 
     except Exception as e:
         db.session.rollback()
         flash(f'Error during checkout: {str(e)}', 'danger')
         return redirect(url_for('cashier'))
 
+@app.route('/checkout_loading_service', methods=['GET', 'POST'])
+def checkout_loading_service():
+    # Retrieve the load balance record
+    load_balance = LoadBalance.query.first()
+
+    # If no LoadBalance record exists, create one with default values
+    if load_balance is None:
+        load_balance = LoadBalance(normal_load=0.0, gcash_balance=0.0)
+        db.session.add(load_balance)
+        db.session.commit()
+
+    if request.method == 'POST':
+        # Safely get the form data
+        amount_loaded_str = request.form.get('amount_loaded')
+        service_provider = request.form.get('service_provider')
+
+        # Validate the input
+        if not amount_loaded_str:
+            flash("Amount Loaded is required", "danger")
+            return redirect(url_for('checkout_loading_service'))
+
+        try:
+            # Convert to float
+            amount_loaded = float(amount_loaded_str)
+            if amount_loaded <= 0:
+                raise ValueError("Amount must be greater than zero.")
+        except ValueError:
+            flash("Invalid amount entered. Please enter a valid number.", "danger")
+            return redirect(url_for('checkout_loading_service'))
+
+        # Determine which balance to check based on the service provider
+        if service_provider == "GCash":
+            balance = load_balance.gcash_balance
+        else:
+            balance = load_balance.normal_load
+
+        # Check if balance is sufficient
+        if balance < amount_loaded:
+            flash("Insufficient balance", "danger")
+            return redirect(url_for('checkout_loading_service'))
+
+        # Calculate the total price based on the amount loaded
+        if amount_loaded >= 1000:
+            # Apply 2% increase for amounts equal to or above ₱1000
+            total_price = amount_loaded + (amount_loaded * 0.02)
+        else:
+            # Apply ₱5 fixed increase for amounts less than ₱1000
+            total_price = amount_loaded + 5
+
+        # Deduct the original loaded amount from the respective balance
+        if service_provider == "GCash":
+            load_balance.gcash_balance -= amount_loaded
+        else:
+            load_balance.normal_load -= amount_loaded
+
+        # Commit the balance deduction
+        db.session.commit()
+
+        # Create a new loading transaction in the unified Transaction table
+        new_transaction = LoadingTransaction(
+            user_id=current_user.id,  # Assuming Flask-Login for user authentication
+            service_provider=service_provider,
+            amount_loaded=amount_loaded,  # Store original loaded amount
+            total_price=total_price  # Store the total price with increments
+        )
+
+        # Add the new loading transaction
+        db.session.add(new_transaction)
+        db.session.commit()
+
+        flash(f'Loading service checkout successful! Total price: ₱{total_price}', 'success')
+        return redirect(url_for('checkout_loading_service'))
+
+    # Query available loading transactions to show in the form (if needed)
+    transactions = LoadingTransaction.query.all()
+
+    return render_template('checkout_loading_service.html', transactions=transactions)
 
 
 # Manage Loading Services

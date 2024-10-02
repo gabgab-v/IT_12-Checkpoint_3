@@ -101,10 +101,11 @@
                 Add Print Service
             </button>
 
-            <!-- Add Loading Service Button -->
-            <button type="button" class="btn btn-success mt-3" data-bs-toggle="modal" data-bs-target="#addLoadingServiceModal">
-                Add Loading Service
+            <!-- Fix: Button for triggering modal (consistent Bootstrap 5 usage) -->
+            <button type="button" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#checkoutLoadingModal">
+                Checkout Loading Service
             </button>
+              
         </div>
     </div>
 
@@ -157,61 +158,38 @@
     </div>
 
 
-    <!-- Add Loading Service Modal -->
-    <div class="modal fade" id="addLoadingServiceModal" tabindex="-1" aria-labelledby="addLoadingServiceModalLabel" aria-hidden="true">
+    <!-- Fix: Modal dialog with Bootstrap 5 structure -->
+    <div class="modal fade" id="checkoutLoadingModal" tabindex="-1" aria-labelledby="checkoutLoadingModalLabel" aria-hidden="true">
         <div class="modal-dialog">
             <div class="modal-content">
-                <form id="loadingServiceForm" method="POST" action="{{ url_for('add_loading_service') }}">
+                <form id="loadingServiceForm" method="POST" action="{{ url_for('checkout_loading_service') }}">
                     <div class="modal-header">
-                        <h5 class="modal-title" id="addLoadingServiceModalLabel">Add Loading Service</h5>
+                        <h5 class="modal-title" id="checkoutLoadingModalLabel">Checkout Loading Service</h5>
                         <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
                     </div>
                     <div class="modal-body">
-                        <!-- Include hidden fields for balance -->
-                        <input type="hidden" id="normal_balance" value="{{ load_balance.normal_load }}">
-                        <input type="hidden" id="gcash_balance" value="{{ load_balance.gcash_balance }}">
-                        
-                        <!-- Display balance based on selected service provider -->
-                        <div id="balance_display" class="text-center mb-3"></div>
-
-                        <!-- Amount loaded input -->
-                        <div class="form-group">
-                            <label for="amount_loaded">Amount Loaded</label>
-                            <input type="number" class="form-control" id="amount_loaded" name="amount_loaded" step="0.01" placeholder="e.g. 100.00" required>
-                        </div>
-
-                        <!-- Service provider selection (this will affect the load balance) -->
                         <div class="form-group">
                             <label for="service_provider">Service Provider</label>
-                            <select class="form-control" id="service_provider" name="service_provider" onchange="updateBalance()" required>
-                                <option value="Globe">Globe</option>
-                                <option value="Smart">Smart</option>
+                            <select class="form-control" id="service_provider" name="service_provider">
+                                <option value="Normal Load">Normal Load</option>
                                 <option value="GCash">GCash</option>
-                                <option value="PayMaya">PayMaya</option>
                             </select>
                         </div>
-
-                        <!-- Add Restock ID to loading transaction form -->
                         <div class="form-group">
-                            <label for="restock_id">Restock ID (optional)</label>
-                            <select class="form-control" id="restock_id" name="restock_id">
-                                {% for restock in restock_events %}
-                                <option value="{{ restock.id }}">
-                                    {{ restock.id }} - {{ restock.restock_location }} ({{ restock.restock_date }})
-                                </option>
-                                {% endfor %}
-                            </select>
+                            <label for="amount_loaded">Amount to Load</label>
+                            <input type="number" class="form-control" id="amount_loaded" name="amount_loaded" required>
                         </div>
+                        <!-- Fix: Add restock_id field if required -->
+                        <input type="hidden" id="restock_id" name="restock_id" value="{{ restock_id or '' }}">
                     </div>
                     <div class="modal-footer">
-                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
-                        <button type="submit" class="btn btn-primary">Add Loading Service</button>
+                        <button type="submit" class="btn btn-primary">Checkout</button>
                     </div>
                 </form>
             </div>
         </div>
     </div>
-
+  
 
 
     <div class="total-panel">
@@ -226,7 +204,9 @@
                 <button type="submit" id="checkoutButton">Checkout</button>
             </form>
         </div>
+        
     </div>
+    
     
 </div>
 
@@ -237,8 +217,9 @@ let unitsCount = 0;
 // JavaScript to dynamically show the balance for Normal Load or GCash
 function updateBalance() {
     const serviceProvider = document.getElementById('service_provider').value;
-    const normalBalance = parseFloat(document.getElementById('normal_balance').value);
-    const gcashBalance = parseFloat(document.getElementById('gcash_balance').value);
+    const normalBalance = parseFloat(document.getElementById('normal_balance').value) || 0;
+    const gcashBalance = parseFloat(document.getElementById('gcash_balance').value) || 0;
+
 
     const balanceDisplay = document.getElementById('balance_display');
     if (serviceProvider === 'GCash') {
@@ -372,55 +353,60 @@ document.getElementById('printServiceForm').addEventListener('submit', function(
 
 // Add load transaction to the cart
 document.getElementById('loadingServiceForm').addEventListener('submit', function(event) {
-    event.preventDefault();
+        event.preventDefault();
 
-    // Get loading transaction details
-    const amountLoaded = parseFloat(document.getElementById('amount_loaded').value);
-    const serviceProvider = document.getElementById('service_provider').value;
-    const restockId = document.getElementById('restock_id').value;
+        const amountLoaded = parseFloat(document.getElementById('amount_loaded').value);
+        const serviceProvider = document.getElementById('service_provider').value;
+        const restockId = document.getElementById('restock_id').value;
 
-    // Add loading transaction details to the product list table
-    const productTable = document.getElementById('productTableBody');
-    const newRow = productTable.insertRow();
-    newRow.innerHTML = `
-        <td>Load Service - ${serviceProvider}</td>
-        <td>P ${amountLoaded.toFixed(2)}</td>
-        <td>1</td>
-        <td>P ${amountLoaded.toFixed(2)}</td>
-    `;
+        if (amountLoaded <= 0 || isNaN(amountLoaded)) {
+            alert('Please enter a valid amount for loading.');
+            return;
+        }
 
-    // Update totals
-    totalAmount += amountLoaded;
-    unitsCount += 1;
+        // Add loading transaction details to the product list table
+        const productTable = document.getElementById('productTableBody');
+        const newRow = productTable.insertRow();
+        newRow.innerHTML = `
+            <td>Load Service - ${serviceProvider}</td>
+            <td>P ${amountLoaded.toFixed(2)}</td>
+            <td>1</td>
+            <td>P ${amountLoaded.toFixed(2)}</td>
+        `;
 
-    document.getElementById('totalAmount').textContent = `P ${totalAmount.toFixed(2)}`;
-    document.getElementById('unitsCount').textContent = unitsCount;
+        // Update totals
+        totalAmount += amountLoaded;
+        unitsCount += 1;
 
-    // Add loading transaction details to hidden checkout form
-    const checkoutForm = document.getElementById('checkoutForm');
+        document.getElementById('totalAmount').textContent = `P ${totalAmount.toFixed(2)}`;
+        document.getElementById('unitsCount').textContent = unitsCount;
 
-    const loadAmountInput = document.createElement('input');
-    loadAmountInput.type = 'hidden';
-    loadAmountInput.name = 'load_amounts[]';
-    loadAmountInput.value = amountLoaded;
-    checkoutForm.appendChild(loadAmountInput);
+        // Add loading transaction details to hidden checkout form
+        const checkoutForm = document.getElementById('checkoutForm');
 
-    const serviceProviderInput = document.createElement('input');
-    serviceProviderInput.type = 'hidden';
-    serviceProviderInput.name = 'service_providers[]';
-    serviceProviderInput.value = serviceProvider;
-    checkoutForm.appendChild(serviceProviderInput);
+        const loadAmountInput = document.createElement('input');
+        loadAmountInput.type = 'hidden';
+        loadAmountInput.name = 'load_amounts[]';
+        loadAmountInput.value = amountLoaded;
+        checkoutForm.appendChild(loadAmountInput);
 
-    const restockIdInput = document.createElement('input');
-    restockIdInput.type = 'hidden';
-    restockIdInput.name = 'restock_ids[]';
-    restockIdInput.value = restockId;
-    checkoutForm.appendChild(restockIdInput);
+        const serviceProviderInput = document.createElement('input');
+        serviceProviderInput.type = 'hidden';
+        serviceProviderInput.name = 'service_providers[]';
+        serviceProviderInput.value = serviceProvider;
+        checkoutForm.appendChild(serviceProviderInput);
 
-    // Close the modal
-    const loadModal = bootstrap.Modal.getInstance(document.getElementById('addLoadingServiceModal'));
-    loadModal.hide();
-});
+        const restockIdInput = document.createElement('input');
+        restockIdInput.type = 'hidden';
+        restockIdInput.name = 'restock_ids[]';
+        restockIdInput.value = restockId;
+        checkoutForm.appendChild(restockIdInput);
+
+        // Close the modal
+        const loadModal = bootstrap.Modal.getInstance(document.getElementById('checkoutLoadingModal'));
+        loadModal.hide();
+    });
+
 </script>
 
 
